@@ -1,90 +1,98 @@
 import streamlit as st
 import pandas as pd
+import altair as alt
 
+# 1. Sayfa Yapılandırması ve Renk Paleti (Navy & Teal)
 st.set_page_config(page_title="Titanic Passenger Insights", layout="wide")
-st.title("🚢 Titanic Passenger Insights")
 
-# 1. Veri Yükleme
+NAVY = "#1B365D"
+TEAL = "#008080"
+LIGHT_TEAL = "#4DB6AC"
+PALETTE = [NAVY, TEAL, LIGHT_TEAL]
+
+st.title("🚢 Titanic Passenger Insights")
+st.caption("Explore survival patterns across passenger groups")
+
+# 2. Veri Yükleme ve Ön İşleme
 @st.cache_data
-def load_data():
+def load_and_prepare_data():
     url = "https://raw.githubusercontent.com/mwaskom/seaborn-data/master/titanic.csv"
     cols = ["survived", "pclass", "sex", "age", "fare", "embarked"]
-    return pd.read_csv(url).loc[:, cols]
+    raw = pd.read_csv(url).loc[:, cols]
 
-raw_df = load_data()
+    # Cleaned kopya (Eksik değer doldurma)
+    cleaned = raw.fillna({
+        "age": raw["age"].median(),
+        "embarked": raw["embarked"].mode()[0]
+    })
 
-# 2. Yükleme ve İnceleme (Load & Inspect)
-st.header("1. Veri Seti İncelemesi")
-col1, col2 = st.columns(2)
-with col1:
-    st.write(f"**Boyut:** {raw_df.shape[0]} satır, {raw_df.shape[1]} sütun")
-    st.dataframe(raw_df.dtypes.astype(str).rename("Veri Tipi"))
-with col2:
-    st.write("**Eksik Değerler (Öncesi):**")
-    st.dataframe(raw_df.isnull().sum().rename("Eksik Sayısı"))
+    # Transformed kopya (Normalizasyon, Gruplama, Kategorik Kodlama)
+    transformed = cleaned.copy()
+    for col in ["age", "fare"]:
+        transformed[f"{col}_norm"] = (transformed[col] - transformed[col].min()) / (transformed[col].max() - transformed[col].min())
 
-st.write("**İlk 5 Satır (`iloc`):**")
-st.dataframe(raw_df.iloc[:5, :])
+    age_labels = ["Child", "Teen", "Young Adult", "Adult", "Older Adult"]
+    transformed["age_group"] = pd.cut(transformed["age"], bins=[-1, 12, 18, 35, 60, 120], labels=age_labels)
+    
+    # Tek sütunda F / M ve mevcut Embarked kodu
+    transformed["sex_code"] = transformed["sex"].map({"female": "F", "male": "M"})
+    transformed["embarked_code"] = transformed["embarked"]  # S, C, Q statüleri
 
-# 3. Eksik Değerleri Doldurma
-st.header("2. Eksik Değerlerin İşlenmesi")
-df = raw_df.fillna({
-    "age": raw_df["age"].median(),
-    "embarked": raw_df["embarked"].mode()[0]
-})
-st.dataframe(df.isnull().sum().rename("İşlem Sonrası Eksik"))
+    return raw, cleaned, transformed
 
-# 4. Özellik Dönüşümleri (Min-Max & Discretization)
-st.header("3. Özellik Dönüşümleri")
-for col in ["age", "fare"]:
-    df[f"{col}_norm"] = (df[col] - df[col].min()) / (df[col].max() - df[col].min())
+raw_df, cleaned_df, df = load_and_prepare_data()
+age_labels = ["Child", "Teen", "Young Adult", "Adult", "Older Adult"]
 
-labels = ["Child", "Teen", "Young Adult", "Adult", "Older Adult"]
-df["age_group"] = pd.cut(df["age"], bins=[-1, 12, 18, 35, 60, 120], labels=labels)
+# 3. Kenar Çubuğu (Sidebar) Filtreleri
+st.sidebar.header("Filters")
+pclass_opts = ["All"] + sorted(df["pclass"].unique().tolist())
+sex_opts = ["All", "F", "M"]
+age_opts = ["All"] + age_labels
 
-st.dataframe(df[["age", "age_norm", "fare", "fare_norm", "age_group"]].head())
+sel_pclass = st.sidebar.selectbox("Passenger class", pclass_opts)
+sel_sex = st.sidebar.selectbox("Sex", sex_opts)
+sel_age = st.sidebar.selectbox("Age group", age_opts)
 
-# 5. Sadeleştirilmiş Kategorik Kodlama (Tek Sütunda F/M ve Embarked)
-st.header("4. Kategorik Kodlama (Sadeleştirilmiş)")
-df_encoded = df.copy()
-df_encoded["sex"] = df_encoded["sex"].map({"female": "F", "male": "M"})
-# embarked zaten tek sütunda 'S', 'C', 'Q' olarak liman statüsünü tutuyor
+filtered_df = df.copy()
+if sel_pclass != "All":
+    filtered_df = filtered_df[filtered_df["pclass"] == sel_pclass]
+if sel_sex != "All":
+    filtered_df = filtered_df[filtered_df["sex_code"] == sel_sex]
+if sel_age != "All":
+    filtered_df = filtered_df[filtered_df["age_group"] == sel_age]
 
-c_before, c_after = st.columns(2)
-with c_before:
-    st.write("**Öncesi:**")
-    st.dataframe(df[["survived", "sex", "embarked"]].head(5))
-with c_after:
-    st.write("**Sonrası (Tek Sütun F/M ve Embarked):**")
-    st.dataframe(df_encoded[["survived", "sex", "embarked"]].head(5))
+# 4. Dört Sekmeli Ana Arayüz
+tab1, tab2, tab3, tab4 = st.tabs(["Overview", "Explore", "Preprocessing", "Data Explorer"])
 
-# 6. İnteraktif Dashboard
-st.header("5. İnteraktif Hayatta Kalma Analizi")
-st.sidebar.header("Filtreler")
+# --- TAB 1: OVERVIEW ---
+with tab1:
+    k1, k2, k3, k4 = st.columns(4)
+    total_p = len(filtered_df)
+    survivors = int(filtered_df["survived"].sum()) if total_p else 0
+    surv_rate = (filtered_df["survived"].mean() * 100) if total_p else 0.0
+    avg_fare = filtered_df["fare"].mean() if total_p else 0.0
 
-pclass_sel = st.sidebar.multiselect("Sınıf (Pclass)", sorted(df_encoded["pclass"].unique()), default=sorted(df_encoded["pclass"].unique()))
-sex_sel = st.sidebar.multiselect("Cinsiyet (Sex)", ["F", "M"], default=["F", "M"])
-age_sel = st.sidebar.multiselect("Yaş Grubu", labels, default=labels)
+    k1.metric("Passengers in selection", total_p)
+    k2.metric("Survivors", survivors)
+    k3.metric("Survival rate", f"{surv_rate:.1f}%")
+    k4.metric("Average fare", f"${avg_fare:.2f}")
 
-filtered = df_encoded[
-    df_encoded["pclass"].isin(pclass_sel) &
-    df_encoded["sex"].isin(sex_sel) &
-    df_encoded["age_group"].isin(age_sel)
-]
+    st.markdown("---")
+    c1, c2 = st.columns(2)
 
-m1, m2, m3 = st.columns(3)
-m1.metric("Yolcu Sayısı", len(filtered))
-m2.metric("Hayatta Kalma Oranı", f"%{(filtered['survived'].mean() * 100):.1f}" if len(filtered) else "%0.0")
-m3.metric("Ortalama Ücret", f"${filtered['fare'].mean():.2f}" if len(filtered) else "$0.00")
+    with c1:
+        st.subheader("Survival Counts")
+        surv_counts = filtered_df["survived"].map({0: "Did Not Survive", 1: "Survived"}).value_counts().reset_index()
+        surv_counts.columns = ["Status", "Count"]
+        chart_counts = alt.Chart(surv_counts).mark_bar().encode(
+            x=alt.X("Status:N", title="Survival Status", axis=alt.Axis(labelAngle=0)),
+            y=alt.Y("Count:Q", title="Number of Passengers"),
+            color=alt.Color("Status:N", scale=alt.Scale(domain=["Did Not Survive", "Survived"], range=[NAVY, TEAL]), legend=None)
+        ).properties(height=320)
+        st.altair_chart(chart_counts, use_container_width=True)
 
-g1, g2 = st.columns(2)
-with g1:
-    st.subheader("Sınıfa Göre Hayatta Kalma")
-    st.bar_chart(filtered.groupby("pclass")["survived"].mean())
-with g2:
-    st.subheader("Yaş Grubuna Göre Hayatta Kalma")
-    st.bar_chart(filtered.groupby("age_group", observed=False)["survived"].mean())
-
-# 7. Bulgu
-st.header("6. Temel Bulgu")
-st.info("📌 **Bulgu:** 1. sınıf (Pclass 1) yolcuların ve kadın (`F`) yolcuların hayatta kalma oranları diğer gruplara göre belirgin şekilde daha yüksektir. *(Gözlemlenen istatistiksel bir ilişkidir; doğrudan nedensellik iddiası içermez.)*")
+    with c2:
+        st.subheader("Survival Rate by Passenger Class")
+        class_rate = filtered_df.groupby("pclass", as_index=False)["survived"].mean()
+        class_rate["survived"] *= 100
+        chart_class = alt
