@@ -95,4 +95,111 @@ with tab1:
         st.subheader("Survival Rate by Passenger Class")
         class_rate = filtered_df.groupby("pclass", as_index=False)["survived"].mean()
         class_rate["survived"] *= 100
-        chart_class = alt
+        chart_class = alt.Chart(class_rate).mark_bar(color=TEAL).encode(
+            x=alt.X("pclass:O", title="Passenger Class", axis=alt.Axis(labelAngle=0)),
+            y=alt.Y("survived:Q", title="Survival Rate (%)", scale=alt.Scale(domain=[0, 100]))
+        ).properties(height=320)
+        st.altair_chart(chart_class, use_container_width=True)
+
+    st.caption("Note: Rates describe this dataset only.")
+
+# --- TAB 2: EXPLORE ---
+with tab2:
+    st.subheader("Compare Passenger Groups")
+    g1, g2 = st.columns(2)
+
+    with g1:
+        st.markdown("**Survival Rate by Class**")
+        c_rate = filtered_df.groupby("pclass", as_index=False)["survived"].mean()
+        c_rate["survived"] *= 100
+        ch1 = alt.Chart(c_rate).mark_bar().encode(
+            x=alt.X("pclass:O", title="Passenger Class", axis=alt.Axis(labelAngle=0)),
+            y=alt.Y("survived:Q", title="Survival Rate (%)", scale=alt.Scale(domain=[0, 100])),
+            color=alt.Color("pclass:O", scale=alt.Scale(range=PALETTE), legend=None)
+        ).properties(height=280)
+        st.altair_chart(ch1, use_container_width=True)
+
+    with g2:
+        st.markdown("**Survival Rate by Sex**")
+        s_rate = filtered_df.groupby("sex_code", as_index=False)["survived"].mean()
+        s_rate["survived"] *= 100
+        ch2 = alt.Chart(s_rate).mark_bar().encode(
+            x=alt.X("sex_code:N", title="Sex (F = Female, M = Male)", axis=alt.Axis(labelAngle=0)),
+            y=alt.Y("survived:Q", title="Survival Rate (%)", scale=alt.Scale(domain=[0, 100])),
+            color=alt.Color("sex_code:N", scale=alt.Scale(domain=["F", "M"], range=[TEAL, NAVY]), legend=None)
+        ).properties(height=280)
+        st.altair_chart(ch2, use_container_width=True)
+
+    g3, g4 = st.columns(2)
+    with g3:
+        st.markdown("**Age Distribution**")
+        ch3 = alt.Chart(filtered_df).mark_bar(color=NAVY).encode(
+            x=alt.X("age:Q", bin=alt.Bin(maxbins=20), title="Age (Years)"),
+            y=alt.Y("count():Q", title="Number of Passengers")
+        ).properties(height=280)
+        st.altair_chart(ch3, use_container_width=True)
+
+    with g4:
+        st.markdown("**Average Fare by Class**")
+        f_class = filtered_df.groupby("pclass", as_index=False)["fare"].mean()
+        ch4 = alt.Chart(f_class).mark_bar().encode(
+            x=alt.X("pclass:O", title="Passenger Class", axis=alt.Axis(labelAngle=0)),
+            y=alt.Y("fare:Q", title="Average Fare ($)"),
+            color=alt.Color("pclass:O", scale=alt.Scale(range=PALETTE), legend=None)
+        ).properties(height=280)
+        st.altair_chart(ch4, use_container_width=True)
+
+    st.info("**Finding:** Within this dataset, first-class passengers and female passengers (`F`) exhibit noticeably higher survival rates compared to other passenger groups.")
+
+# --- TAB 3: PREPROCESSING ---
+with tab3:
+    with st.expander("Section 1: Missing Values", expanded=True):
+        st.caption("Missing values in `age` were imputed using the median, while missing `embarked` entries were filled with the most frequent port.")
+        m_col1, m_col2 = st.columns(2)
+        with m_col1:
+            st.write("**Before Imputation**")
+            st.dataframe(raw_df[["age", "embarked"]].isnull().sum().rename("Missing Count"))
+        with m_col2:
+            st.write("**After Imputation**")
+            st.dataframe(cleaned_df[["age", "embarked"]].isnull().sum().rename("Missing Count"))
+
+    with st.expander("Section 2: Normalization", expanded=False):
+        st.caption("Min-Max normalization rescales `age` and `fare` to a [0, 1] range while preserving their original columns.")
+        st.dataframe(df[["age", "age_norm", "fare", "fare_norm"]].head(6), use_container_width=True)
+
+    with st.expander("Section 3: Age Discretization", expanded=False):
+        st.caption("Continuous `age` values are grouped into five ordered life-stage categories (`age_group`).")
+        st.dataframe(df[["age", "age_group"]].head(6), use_container_width=True)
+
+    with st.expander("Section 4: Categorical Coding (Sex & Embarked)", expanded=False):
+        st.caption("Categorical values are simplified into single compact columns (`sex_code` as F/M and `embarked_code` as port status) without normalizing target or indicator columns.")
+        c_b, c_a = st.columns(2)
+        with c_b:
+            st.write("**Before**")
+            st.dataframe(cleaned_df[["survived", "sex", "embarked"]].head(5))
+        with c_a:
+            st.write("**After**")
+            st.dataframe(df[["survived", "sex_code", "embarked_code"]].head(5))
+
+# --- TAB 4: DATA EXPLORER ---
+with tab4:
+    st.subheader("Dataset Records")
+    view_choice = st.radio("Select view:", ["Raw", "Cleaned", "Transformed"], horizontal=True)
+
+    if view_choice == "Raw":
+        display_df = raw_df.copy()
+        default_cols = ["survived", "pclass", "sex", "age", "fare", "embarked"]
+    elif view_choice == "Cleaned":
+        display_df = cleaned_df.copy()
+        default_cols = ["survived", "pclass", "sex", "age", "fare", "embarked"]
+    else:
+        display_df = filtered_df.copy()
+        default_cols = ["survived", "pclass", "sex_code", "age", "age_group", "fare", "embarked_code"]
+
+    selected_cols = st.multiselect("Choose columns to display:", options=display_df.columns.tolist(), default=default_cols)
+    st.write(f"**Row count:** {len(display_df)} records")
+
+    if selected_cols:
+        st.dataframe(display_df[selected_cols], use_container_width=True, height=400)
+    else:
+        st.warning("Please select at least one column to display.")
